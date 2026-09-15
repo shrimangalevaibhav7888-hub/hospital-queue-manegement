@@ -1,0 +1,312 @@
+// Prisma schema for CareFlow Hospital Patient Queue Management & Smart Arrival System
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String        @id @default(uuid())
+  email        String        @unique
+  passwordHash String
+  name         String
+  phone        String?
+  role         String        // "PATIENT" | "DOCTOR" | "RECEPTIONIST" | "ADMIN"
+  isActive     Boolean       @default(true)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  patient      Patient?
+  doctor       Doctor?
+  notifications Notification[]
+  auditLogs    AuditLog[]
+
+  @@index([role])
+  @@index([email])
+}
+
+model Patient {
+  id               String            @id @default(uuid())
+  patientCode      String            @unique // e.g. PAT-100024
+  userId           String?           @unique
+  name             String
+  email            String?
+  phone            String
+  gender           String            // "MALE" | "FEMALE" | "OTHER"
+  dateOfBirth      DateTime?
+  address          String?
+  emergencyContact String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  user             User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
+  appointments     Appointment[]
+  visits           Visit[]
+  travelPreference TravelPreference?
+  consultations    Consultation[]
+  notifications    Notification[]
+
+  @@index([patientCode])
+  @@index([phone])
+  @@index([name])
+}
+
+model Department {
+  id          String        @id @default(uuid())
+  code        String        @unique // e.g. "CARD", "ORTHO", "PEDS"
+  name        String
+  description String?
+  location    String?       // e.g. "Building A, Floor 2"
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  doctors      Doctor[]
+  appointments Appointment[]
+
+  @@index([code])
+}
+
+model Doctor {
+  id                      String           @id @default(uuid())
+  doctorCode              String           @unique // e.g. "DOC-001"
+  userId                  String           @unique
+  name                    String
+  specialization          String
+  departmentId            String
+  avgConsultationDuration Int              @default(15) // in minutes
+  status                  String           @default("AVAILABLE") // "AVAILABLE" | "BUSY" | "ON_BREAK" | "DELAYED" | "OFFLINE"
+  currentDelayMinutes     Int              @default(0)
+  delayReason             String?
+  roomNumber              String           // e.g. "Room 204"
+  createdAt               DateTime         @default(now())
+  updatedAt               DateTime         @updatedAt
+
+  user                    User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  department              Department       @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  schedules               DoctorSchedule[]
+  queues                  Queue[]
+  appointments            Appointment[]
+  visits                  Visit[]          @relation("DoctorVisits")
+  tokens                  Token[]
+  consultations           Consultation[]
+  delays                  DoctorDelay[]
+
+  @@index([doctorCode])
+  @@index([departmentId])
+  @@index([status])
+}
+
+model DoctorSchedule {
+  id                 String   @id @default(uuid())
+  doctorId           String
+  dayOfWeek          Int      // 0 (Sun) to 6 (Sat)
+  startTime          String   // "09:00"
+  endTime            String   // "17:00"
+  slotDurationMinutes Int     @default(15)
+  isAvailable        Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  doctor             Doctor   @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  @@index([doctorId, dayOfWeek])
+}
+
+model Queue {
+  id            String       @id @default(uuid())
+  doctorId      String
+  queueDate     String       // "YYYY-MM-DD"
+  status        String       @default("ACTIVE") // "ACTIVE" | "PAUSED" | "CLOSED"
+  currentNumber Int          @default(0)
+  totalTokens   Int          @default(0)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  doctor        Doctor       @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  visits        Visit[]
+
+  @@unique([doctorId, queueDate])
+  @@index([queueDate])
+  @@index([status])
+}
+
+model Appointment {
+  id              String       @id @default(uuid())
+  appointmentCode String       @unique // e.g. "APT-20260915-001"
+  patientId       String
+  doctorId        String
+  departmentId    String
+  scheduledDate   String       // "YYYY-MM-DD"
+  scheduledTime   String       // "09:30"
+  status          String       @default("BOOKED") // "BOOKED" | "CONFIRMED" | "CHECKED_IN" | "CANCELLED" | "NO_SHOW" | "COMPLETED"
+  type            String       @default("ONLINE") // "ONLINE" | "WALK_IN" | "FOLLOW_UP"
+  notes           String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  patient         Patient      @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctor          Doctor       @relation(fields: [doctorId], references: [id], onDelete: Restrict)
+  department      Department   @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  visit           Visit?
+
+  @@index([patientId])
+  @@index([doctorId, scheduledDate])
+  @@index([status])
+}
+
+model Visit {
+  id                     String        @id @default(uuid())
+  visitCode              String        @unique // e.g. "VISIT-20260915-00125"
+  patientId              String
+  doctorId               String
+  appointmentId          String?       @unique
+  queueId                String
+  status                 String        @default("BOOKED") // "BOOKED" | "CHECKED_IN" | "WAITING" | "CALLED" | "IN_CONSULTATION" | "COMPLETED" | "CANCELLED" | "NO_SHOW" | "REASSIGNED" | "TRANSFERRED"
+  priorityLevel          Int           @default(0) // 0: NORMAL, 1: PRIORITY, 2: EMERGENCY
+  checkInTime            DateTime?
+  calledTime             DateTime?
+  consultationStartTime  DateTime?
+  consultationEndTime    DateTime?
+  reassignedFromDoctorId String?
+  reassignedReason       String?
+  notes                  String?
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
+
+  patient                Patient       @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctor                 Doctor        @relation("DoctorVisits", fields: [doctorId], references: [id], onDelete: Restrict)
+  appointment            Appointment?  @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  queue                  Queue         @relation(fields: [queueId], references: [id], onDelete: Cascade)
+  token                  Token?
+  consultation           Consultation?
+
+  @@index([patientId])
+  @@index([doctorId])
+  @@index([queueId])
+  @@index([status])
+  @@index([priorityLevel])
+  @@index([checkInTime])
+}
+
+model Token {
+  id           String   @id @default(uuid())
+  tokenNumber  Int      // 1, 2, 3...
+  tokenDisplay String   // e.g. "DR-A-015" or "DOC-1-015"
+  visitId      String   @unique
+  doctorId     String
+  queueDate    String   // "YYYY-MM-DD"
+  createdAt    DateTime @default(now())
+
+  visit        Visit    @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  doctor       Doctor   @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  @@unique([doctorId, queueDate, tokenNumber])
+  @@index([doctorId, queueDate])
+}
+
+model TravelPreference {
+  id                 String   @id @default(uuid())
+  patientId          String   @unique
+  originAddress      String?
+  travelTimeMinutes  Int      @default(25)
+  safetyBufferMinutes Int     @default(10)
+  transportMode      String   @default("DRIVING") // "DRIVING" | "TRANSIT" | "WALKING"
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  patient            Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+}
+
+model Consultation {
+  id                    String   @id @default(uuid())
+  visitId               String   @unique
+  doctorId              String
+  patientId             String
+  actualDurationMinutes Int      @default(15)
+  diagnosis             String?
+  prescription          String?
+  notes                 String?
+  createdAt             DateTime @default(now())
+
+  visit                 Visit    @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  doctor                Doctor   @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  patient               Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([doctorId])
+  @@index([patientId])
+}
+
+model DoctorDelay {
+  id           String    @id @default(uuid())
+  doctorId     String
+  delayMinutes Int
+  reason       String
+  isResolved   Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  resolvedAt   DateTime?
+
+  doctor       Doctor    @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  @@index([doctorId])
+  @@index([isResolved])
+}
+
+model Notification {
+  id            String   @id @default(uuid())
+  recipientType String   // "PATIENT" | "DOCTOR" | "STAFF"
+  patientId     String?
+  userId        String?
+  title         String
+  message       String
+  channel       String   @default("IN_APP") // "IN_APP" | "SMS_MOCK" | "PUSH_MOCK"
+  isRead        Boolean  @default(false)
+  eventType     String   // "TOKEN_GENERATED" | "PATIENT_CALLED" | "DOCTOR_DELAY" | "GET_READY" | "LEAVE_HOME" | etc.
+  metadata      String?  // JSON string
+  createdAt     DateTime @default(now())
+
+  user          User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  patient       Patient? @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([patientId])
+  @@index([isRead])
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  timestamp   DateTime @default(now())
+  actorId     String?
+  actorName   String
+  actorRole   String
+  action      String   // "PATIENT_CHECKED_IN" | "TOKEN_GENERATED" | "PATIENT_CALLED" | "DOCTOR_DELAY_UPDATED" | etc.
+  entity      String   // "Queue" | "Visit" | "Token" | "Doctor" | "Appointment"
+  entityId    String
+  beforeState String?  // JSON string
+  afterState  String?  // JSON string
+  reason      String?
+  metadata    String?  // JSON string
+
+  actor       User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([action])
+  @@index([entity])
+  @@index([entityId])
+  @@index([actorRole])
+  @@index([timestamp])
+}
+
+model QueueConfiguration {
+  id                          String   @id @default(uuid())
+  hospitalName                String   @default("CareFlow Central Hospital")
+  defaultConsultationMinutes  Int      @default(15)
+  defaultSafetyBufferMinutes  Int      @default(10)
+  defaultTravelTimeMinutes    Int      @default(25)
+  emergencyPriorityBonus      Int      @default(2)
+  allowOnlineCheckInHours     Int      @default(2)
+  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime @updatedAt
+}

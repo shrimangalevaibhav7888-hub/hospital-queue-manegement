@@ -1,0 +1,24 @@
+{
+  "name": "careflow-hospital-queue-system",
+  "version": "1.0.0",
+  "description": "Production-grade Hospital Patient Queue Management & Smart Arrival System",
+  "private": true,
+  "scripts": {
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "build": "npm --prefix backend run build && npm --prefix frontend run build",
+    "test": "npm --prefix backend test",
+    "seed": "npm --prefix backend run seed"
+  },
+  "keywords": [
+    "hospital",
+    "queue-management",
+    "smart-arrival",
+    "socket.io",
+    "prisma",
+    "react",
+    "express"
+  ],
+  "author": "CareFlow Health",
+  "license": "ISC"
+}
